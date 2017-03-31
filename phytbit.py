@@ -81,25 +81,29 @@ class TkFitBit(tk.Frame):
         start_date = conn.execute("SELECT time FROM heartrate ORDER BY time DESC LIMIT 1").fetchone()
         if start_date:
             start_date = datetime.datetime.strptime(start_date[0], SQLITE_TIME_FORMAT)
+            start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
         else:
             start_date = today - datetime.timedelta(days=30)
         end_date = today
-        print(start_date, "-->", end_date)
-        response = fitbit.make_request(f"https://api.fitbit.com/1/user/{user}/{resource}/date/"
-                                       f"{today.strftime(FITBIT_TIME_FORMAT)}/{period}/{frequency}.json")
-        if "activities-heart-intraday" in response:
-            if "dataset" in response["activities-heart-intraday"]:
-                data = response["activities-heart-intraday"]["dataset"]
-                for item in data:
-                    t = datetime.datetime.strptime(item["time"], "%H:%M:%S")
-                    t = t.replace(year=today.year, month=today.month, day=today.day)
-                    item["time"] = t.strftime(SQLITE_TIME_FORMAT)  # SQLITE3's expected DATETIME format
-                conn.executemany("INSERT OR REPLACE INTO heartrate VALUES(?, ?)",
-                                 [(item['time'], item['value']) for item in data])
+        query_date = start_date
+        while query_date <= end_date:
+            url = f"https://api.fitbit.com/1/user/{user}/{resource}/date/" \
+                  f"{query_date.strftime(FITBIT_TIME_FORMAT)}/{period}/{frequency}.json"
+            response = fitbit.make_request(url)
+            if "activities-heart-intraday" in response:
+                if "dataset" in response["activities-heart-intraday"]:
+                    data = response["activities-heart-intraday"]["dataset"]
+                    for item in data:
+                        t = datetime.datetime.strptime(item["time"], "%H:%M:%S")
+                        t = t.replace(year=query_date.year, month=query_date.month, day=query_date.day)
+                        item["time"] = t.strftime(SQLITE_TIME_FORMAT)  # SQLITE3's expected DATETIME format
+                    conn.executemany("INSERT OR REPLACE INTO heartrate VALUES(?, ?)",
+                                     [(item['time'], item['value']) for item in data])
+                else:
+                    print("'dataset' not found!")
             else:
-                print("'dataset' not found!")
-        else:
-            print("'activities-heart-intraday' not found!")
+                print("'activities-heart-intraday' not found!")
+            query_date += datetime.timedelta(days=1)
         conn.commit()
         conn.close()
         self.reload_data()
